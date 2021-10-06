@@ -4,7 +4,7 @@ set -euo pipefail
 export SAMBA_DOMAIN="INTERNAL"
 export SAMBA_REALM="INTERNAL.RELENTLESS.FARM"
 export SAMBA_DOMAIN_PASSWORD="artemisr12@"
-export NET_DEV="eth0"
+export NET_DEV="net1"
 
 ip=$(ip addr show dev ${NET_DEV} | grep inet | awk '{ print $2 }' | awk -F '/' '{ print $1 }')
 echo "${ip} $(hostname).${SAMBA_REALM}" >> /etc/hosts

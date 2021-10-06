@@ -1,13 +1,54 @@
+apiVersion: "k8s.cni.cncf.io/v1"
+kind: NetworkAttachmentDefinition
+metadata:
+  name: static-ip-conf
+spec:
+  config: '{
+    "cniVersion": "0.3.1",
+	  "name": "lan",
+	  "type": "bridge",
+	  "bridge": "br-lan",
+	  "ipam": {
+	    "type": "static",
+      "addresses": [
+	      {
+		      "address": "172.16.0.1/16"
+			  }
+		  ]
+    }
+  }'
 ---
-apiVersion: v1
+apiversion: apps/v1
+kind: networkattachmentdefinition
+metadata:
+  name: macvlan-conf
+spec:
+  config: '{
+    "cniversion": "0.3.1",
+    "type": "macvlan",
+    "master": "eth0",
+    "mode": "bridge",
+    "ipam": {
+      "type": "host-local",
+      "subnet": "192.168.1.0/24",
+      "rangestart": "192.168.1.4",
+        "rangeend": "192.168.1.254",
+      "routes": [
+        { "dst": "0.0.0.0/0" }
+      ],
+      "gateway": "192.168.1.1"
+    }
+  }'
+---
+apiVersion: k8s.cni.cncf.io/v1
 kind: Service
 metadata:
   name: samba-ad-dc-dns
 spec:
   type: ClusterIP
-  clusterIP: 10.96.0.53
+  clusterIP: 172.168.1.1
   selector:
-    app: samba-ad-dc
+    app: samba-ad-dc-dns
   ports:
   - name: dns
     protocol: UDP
@@ -18,34 +59,41 @@ spec:
     port: 53
     targetPort: 53
 ---
-apiVersion: apps/v1
+apiversion: apps/v1
 kind: StatefulSet
 metadata:
   name: dc
 spec:
   selector:
     matchLabels:
-      app: samba-ad-dc
-  serviceName: samba-ad-dc
+      app: samba-ad-dc-dns
+  serviceName: samba-ad-dc-dns
   replicas: 1
   template:
     metadata:
       labels:
-        app: samba-ad-dc
+        app: samba-ad-dc-dns
       annotations:
-        k8s.v1.cni.cncf.io/networks: samba-ad-dc-static-ip-conf
+        k8s.v1.cni.cncf.io/networks: static-ip-conf
     spec:
       containers:
-      - image: opensourcery/samba-ad-dc:4
+      - image: affixalex/samba-ad-dc-dns:latest
         imagePullPolicy: Always
-        name: samba-ad-dc
+        name: samba-ad-dc-dns
+        volumemounts:
+        - name: samba-var-lib
+          mountpath: /var/lib
+        - name: samba-var-log
+          mountpath: /var/log
+        - name: samba-etc
+          mountpath: /etc
         env:
         - name: SAMBA_DOMAIN
-          value: SAMDOM
+          value: INTERNAL
         - name: SAMBA_REALM
-          value: SAMDOM.EXAMPLE.COM
+          value: INTERNAL.RELENTLESS.FARM
         - name: SAMBA_DOMAIN_PASSWORD
-          value: TEMPORARY_ADMIN_PASSWORD
+          value: Artemisr12@
         ports:
         - containerPort: 53
           name: dns
@@ -74,19 +122,72 @@ spec:
           name: ldps-glob-cata
         securityContext:
           privileged: true
-# Assuming you want to persist the important things between pods, you should define the following
-# and possibly some PersistentVolumeClaims depending on your environment
-#        volumeMounts:
-#        - name: samba-ad-dc-var-lib
-#          mountPath: /var/lib/samba
-#        - name: samba-ad-dc-etc
-#          mountPath: /etc/samba
-#        - name: samba-ad-dc-var-log
-#          mountPath: /var/log/samba
-#      volumes:
-#      - name: samba-ad-dc-var-lib
-#        DEFINE_ME
-#      - name: samba-ad-dc-etc
-#        DEFINE_ME
-#      - name: samba-ad-dc-var-log
-#        DEFINE_ME
+        volumeMounts:
+        - name: samba-var-lib
+          mountPath: /var/lib/samba
+        - name: samba-etc
+          mountPath: /etc/samba
+        - name: samba-var-log
+          mountPath: /var/log/samba
+      volumes:
+      - name: samba-var-log
+        hostPath:
+          path: /opt/samba/samba-var-log
+          type: Directory
+      - name: samba-var-lib
+        hostPath:
+          path: /opt/samba/samba-var-lib
+          type: Directory
+      - name: samba-etc
+        hostPath:
+          path: /opt/samba/samba-etc
+          type: Directory
+---
+apiversion: apps/v1
+kind: networkattachmentdefinition
+metadata:
+  name: macvlan-conf
+spec:
+  config: '{
+      "cniversion": "0.3.1",
+      "type": "macvlan",
+      "master": "eth0",
+      "mode": "bridge",
+      "ipam": {
+        "type": "host-local",
+        "subnet": "192.168.1.0/24",
+        "rangestart": "192.168.1.1",
+        "rangeend": "192.168.1.200",
+        "routes": [
+          { "dst": "0.0.0.0/0" }
+        ],
+        "gateway": "192.168.1.1"
+      }
+    }'
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: coredns
+  namespace: kube-system
+data:
+  Corefile: |
+    .:53 {
+        errors
+        health
+        kubernetes cluster.local in-addr.arpa ip6.arpa {
+           pods insecure
+           fallthrough in-addr.arpa ip6.arpa
+        }
+        prometheus :9153
+        forward . 172.16.0.1
+        cache 30
+        loop
+        reload
+        loadbalance
+    }
+    samdom.example.com:53 {
+       errors
+       cache 30
+       proxy . 172.168.1.1
+    }

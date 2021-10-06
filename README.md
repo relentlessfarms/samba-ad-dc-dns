@@ -48,7 +48,11 @@ spec:
 }'
 ```
 
-### Kubernetes
+### Kubernetes (with k3s)*
+
+    git clone https://github.com/k8snetworkplumbingwg/multus-cni.git
+    cat ./deployments/multus-daemonset.yml | k3s kubectl apply -f -
+
 Once you have a networking setup that will work with Samba it's time to add the samba pod to your Kubernetes cluster
 
 Take [The example Kubernetes yaml file](/kubernetes/samba-ad-dc.yml) and edit it to your needs.
